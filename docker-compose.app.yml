@@ -1,0 +1,81 @@
+volumes:
+  db-mysql:
+  app-vendor:
+
+networks:
+  weather-network:
+    driver: bridge
+    name: weather-network
+    ipam:
+      driver: default
+      config:
+        - subnet: "172.16.0.0/24"
+
+services:
+  weather-gateway:
+    image: nginx:1.23-alpine
+    restart: always
+    container_name: weather-gateway
+    networks:
+      weather-network:
+        ipv4_address: 172.16.0.2
+    ports:
+      - "80:80"
+    extra_hosts:
+      - "weather.gateway.internal:172.16.0.3"
+    volumes:
+      - ../weather-backend/:/var/www/weather-app
+      - ../weather-backend/nginx/conf.d:/etc/nginx/templates/
+
+  weather-app:
+    build:
+      context: ../weather-backend/
+      dockerfile: ../weather-devbox/weather-app.Dockerfile
+    restart: always
+    container_name: weather-app
+    working_dir: /var/www/weather-app
+    networks:
+      weather-network:
+        ipv4_address: 172.16.0.3
+    ports:
+      - ":9000"
+    extra_hosts:
+      - "db.weather.local:172.16.0.4"
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ../weather-backend/:/var/www/weather-app
+      - app-vendor:/var/www/weather-app/vendor
+    entrypoint: ["/bin/sh", "-c", "/var/www/weather-app/entrypoint.sh && php-fpm"]
+
+  weather-database:
+    image: mysql:8.0
+    restart: always
+    container_name: weather-database
+    networks:
+      weather-network:
+        ipv4_address: 172.16.0.4
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=secret
+      - MYSQL_DATABASE=weather
+      - MYSQL_USER=weather_user
+      - MYSQL_PASSWORD=secret
+    volumes:
+      - db-mysql:/var/lib/mysql
+
+  weather-cron-scheduler:
+    build:
+      context: ../weather-backend/
+      dockerfile: ../weather-devbox/weather-cron.Dockerfile
+    restart: always
+    container_name: weather-cron-scheduler
+    working_dir: /var/www/weather-app
+    networks:
+      weather-network:
+        ipv4_address: 172.16.0.10
+    extra_hosts:
+      - "db.weather.local:172.16.0.4"
+    volumes:
+      - ../weather-backend/:/var/www/weather-app
+      - app-vendor:/var/www/weather-app/vendor
